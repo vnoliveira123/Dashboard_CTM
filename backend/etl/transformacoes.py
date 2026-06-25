@@ -126,6 +126,12 @@ def agregar_execucoes_timeline(db: Session) -> int:
             logger.info('Continuous Aggregate cagg_execucoes_dia atualizado')
         except Exception as cagg_err:
             logger.info('Continuous Aggregate indisponível (não-TimescaleDB): %s', cagg_err)
+            try:
+                with engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
+                    conn.execute(text("REFRESH MATERIALIZED VIEW cagg_execucoes_dia"))
+                logger.info('cagg_execucoes_dia atualizado via REFRESH MATERIALIZED VIEW')
+            except Exception as mv_err:
+                logger.warning('Fallback REFRESH MATERIALIZED VIEW falhou: %s', mv_err)
 
         return count
 

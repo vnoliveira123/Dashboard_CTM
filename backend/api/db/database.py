@@ -179,12 +179,46 @@ def _migrate_add_ambiente(conn) -> None:
     logger.info("cagg_execucoes_dia dropped — will be recreated with ambiente column")
 
 
+def _setup_fallback_cagg(conn) -> None:
+    """Cria cagg_execucoes_dia como materialized view regular (PostgreSQL puro)."""
+    exists = conn.execute(text(
+        "SELECT COUNT(1) FROM pg_matviews WHERE matviewname = 'cagg_execucoes_dia'"
+    )).scalar()
+    if exists:
+        return
+
+    _ts(conn, """
+        CREATE MATERIALIZED VIEW IF NOT EXISTS cagg_execucoes_dia AS
+        SELECT
+            date_trunc('day', data_execucao)                       AS dia,
+            tabela,
+            job,
+            grupo,
+            ambiente,
+            COUNT(*)                                               AS total,
+            SUM(CASE WHEN status = 'OK'     THEN 1 ELSE 0 END)    AS ok,
+            SUM(CASE WHEN status = 'NOT OK' THEN 1 ELSE 0 END)    AS nok,
+            AVG(duracao_minutos)                                   AS avg_dur,
+            MAX(duracao_minutos)                                   AS max_dur
+        FROM mat_execucoes_timeline
+        GROUP BY 1, tabela, job, grupo, ambiente
+        WITH DATA
+    """, "fallback_cagg")
+    logger.info('cagg_execucoes_dia criada como materialized view padrão (sem TimescaleDB)')
+
+
 def init_db():
     """Cria tabelas, configura TimescaleDB e cria índices."""
     Base.metadata.create_all(bind=engine)
     with engine.connect() as conn:
         _migrate_add_ambiente(conn)
         _setup_timescaledb(conn)
+
+        has_timescaledb = conn.execute(text(
+            "SELECT COUNT(1) FROM pg_extension WHERE extname = 'timescaledb'"
+        )).scalar() or 0
+        if not has_timescaledb:
+            _setup_fallback_cagg(conn)
         for ddl in _INDEXES:
             try:
                 conn.execute(text(ddl))
