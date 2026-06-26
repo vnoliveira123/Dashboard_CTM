@@ -166,7 +166,8 @@ def _migrate_add_ambiente(conn) -> None:
     logger.info("Migration: adding 'ambiente' column…")
     for tbl in ('raw_processos', 'raw_execucoes', 'mat_execucoes_timeline'):
         try:
-            conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10)"))
+            conn.execute(
+                text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10)"))
             conn.commit()
         except Exception as exc:
             logger.warning("ambiente column on %s: %s", tbl, exc)
@@ -176,7 +177,8 @@ def _migrate_add_ambiente(conn) -> None:
                 pass
 
     _ts(conn, "DROP MATERIALIZED VIEW IF EXISTS cagg_execucoes_dia CASCADE", "drop_old_cagg")
-    logger.info("cagg_execucoes_dia dropped — will be recreated with ambiente column")
+    logger.info(
+        "cagg_execucoes_dia dropped — will be recreated with ambiente column")
 
 
 def _setup_fallback_cagg(conn) -> None:
@@ -204,7 +206,8 @@ def _setup_fallback_cagg(conn) -> None:
         GROUP BY 1, tabela, job, grupo, ambiente
         WITH DATA
     """, "fallback_cagg")
-    logger.info('cagg_execucoes_dia criada como materialized view padrão (sem TimescaleDB)')
+    logger.info(
+        'cagg_execucoes_dia criada como materialized view padrão (sem TimescaleDB)')
 
 
 def init_db():

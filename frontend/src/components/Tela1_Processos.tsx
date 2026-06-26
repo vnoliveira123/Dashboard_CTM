@@ -46,12 +46,28 @@ const FILTROS_VAZIOS: FiltrosProcesso = {
 
 
 // ── Wrapper de gráfico ────────────────────────────────────────────────────────
-const ChartCard: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
+const ChartCard: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  legend?: { color: string; label: string }[];
+}> = ({ title, children, legend }) => (
   <Card variant="outlined" sx={{ height: '100%' }}>
     <CardContent sx={{ pb: '16px !important' }}>
-      <Typography variant="subtitle2" fontWeight={700} color="text.secondary" sx={{ mb: 1.5 }}>
-        {title}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1.5 }}>
+        <Typography variant="subtitle2" fontWeight={700} color="text.secondary">
+          {title}
+        </Typography>
+        {legend && (
+          <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
+            {legend.map(it => (
+              <Box key={it.label} sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: it.color, flexShrink: 0 }} />
+                <Typography variant="caption" color="text.secondary">{it.label}</Typography>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
       {children}
     </CardContent>
   </Card>
@@ -60,21 +76,21 @@ const ChartCard: React.FC<{ title: string; children: React.ReactNode }> = ({ tit
 // ── 1. Pizza — Periodicidades ─────────────────────────────────────────────────
 const GraficoPeriodPizza: React.FC<{ data: { periodicidade: string; total: number }[] }> = ({ data }) => {
   if (!data.length) return null;
-  const R = 85; const IR = 48; const CX = 155; const CY = 100;
-  const VW = 480; const VH = 210;
-  const pie   = d3.pie<{ periodicidade: string; total: number }>().value(d => d.total).sort(null);
-  const arc   = d3.arc<d3.PieArcDatum<{ periodicidade: string; total: number }>>().innerRadius(IR).outerRadius(R);
+  const R = 85; const IR = 48; const VW = 240; const VH = 210;
+  const CX = VW / 2; const CY = VH / 2;
+  const pie    = d3.pie<{ periodicidade: string; total: number }>().value(d => d.total).sort(null);
+  const arc    = d3.arc<d3.PieArcDatum<{ periodicidade: string; total: number }>>().innerRadius(IR).outerRadius(R);
   const arcLbl = d3.arc<d3.PieArcDatum<{ periodicidade: string; total: number }>>().innerRadius(R * 0.72).outerRadius(R * 0.72);
   const slices = pie(data);
   const total  = d3.sum(data, d => d.total);
 
   return (
-    <svg viewBox={`0 0 ${VW} ${VH}`} width="100%">
+    <svg viewBox={`0 0 ${VW} ${VH}`} width="100%" style={{ maxWidth: 240 }}>
       <g transform={`translate(${CX},${CY})`}>
         {slices.map((s, i) => (
           <g key={i}>
             <path d={arc(s) ?? ''} fill={CORES_PERIOD[i % CORES_PERIOD.length]} stroke="white" strokeWidth={2}>
-              <title>{s.data.periodicidade}: {s.data.total}</title>
+              <title>{s.data.periodicidade}: {s.data.total} tabelas</title>
             </path>
             {(s.endAngle - s.startAngle) > 0.25 && (
               <text transform={`translate(${arcLbl.centroid(s)})`}
@@ -85,19 +101,7 @@ const GraficoPeriodPizza: React.FC<{ data: { periodicidade: string; total: numbe
           </g>
         ))}
         <text textAnchor="middle" dy="-0.2em" fontSize={15} fontWeight="bold" fill="#333">{total}</text>
-        <text textAnchor="middle" dy="1.2em" fontSize={10} fill="#999">jobs</text>
-      </g>
-      {/* Legenda lateral */}
-      <g transform={`translate(${CX + R + 24}, ${CY - (data.length * 18) / 2})`}>
-        {data.map((d, i) => (
-          <g key={i} transform={`translate(0,${i * 22})`}>
-            <rect width={12} height={12} rx={2} fill={CORES_PERIOD[i % CORES_PERIOD.length]} />
-            <text x={18} y={10} fontSize={11} fill="#444">{d.periodicidade}</text>
-            <text x={180} y={10} fontSize={11} fill="#888" fontWeight="bold" textAnchor="end">
-              {d.total}
-            </text>
-          </g>
-        ))}
+        <text textAnchor="middle" dy="1.2em" fontSize={10} fill="#999">tabelas</text>
       </g>
     </svg>
   );
@@ -450,8 +454,24 @@ const { data, isLoading, error } = useProcessos(filtrosAtivos, page);
           {/* Linha 2: Pizza + Ranking de tabelas */}
           <Grid container spacing={2} sx={{ mb: 3 }}>
             <Grid item xs={12} md={6}>
-              <ChartCard title="Distribuição por Periodicidade">
-                <GraficoPeriodPizza data={graficos.periodicidades} />
+              <ChartCard
+                title="Distribuição por Periodicidade"
+                legend={graficos.periodicidades.map((d, i) => ({
+                  color: CORES_PERIOD[i % CORES_PERIOD.length],
+                  label: d.periodicidade,
+                }))}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <GraficoPeriodPizza data={graficos.periodicidades} />
+                  <Box sx={{ flex: 1, pl: 1 }}>
+                    {graficos.periodicidades.map((d, i) => (
+                      <Box key={d.periodicidade} sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
+                        <Typography variant="caption" color="text.secondary">{d.periodicidade}</Typography>
+                        <Typography variant="caption" fontWeight={700}>{d.total}</Typography>
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
               </ChartCard>
             </Grid>
             <Grid item xs={12} md={6}>

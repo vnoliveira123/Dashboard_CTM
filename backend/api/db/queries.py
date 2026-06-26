@@ -152,7 +152,7 @@ def get_processos_graficos(db: Session, tabela=None, job=None, rotina=None, grup
     )
 
     perio_rows = (
-        base.with_entities(Processo.periodicidade, func.count(Processo.id).label('total'))
+        base.with_entities(Processo.periodicidade, func.count(func.distinct(Processo.tabela)).label('total'))
         .filter(Processo.periodicidade != None)
         .group_by(Processo.periodicidade)
         .order_by(desc('total'))

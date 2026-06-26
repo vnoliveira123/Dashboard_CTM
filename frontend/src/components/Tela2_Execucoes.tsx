@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import * as d3 from 'd3';
 import {
   Box, Paper, Typography, TextField, Button, Chip, CircularProgress, Alert,
@@ -95,7 +95,6 @@ const GraficoVolumeDiario: React.FC<{ data: VolumeData[] }> = ({ data }) => {
                   fill="#f44336" opacity={0.85} />
           </g>
         ))}
-        <Legend items={[{ color: '#4caf50', label: 'OK' }, { color: '#f44336', label: 'NOT OK' }]} x={IW - 90} y={-8} />
       </g>
     </svg>
   );
@@ -193,10 +192,9 @@ const GraficoHorario: React.FC<{ data: HoraData[] }> = ({ data }) => {
 };
 
 
-// ── Chart 6: Série temporal do JOB filtrado ───────────────────────────────────
-// vw permite usar viewBox mais largo para gráficos em linha inteira (xs=12),
-// compensando a largura dupla e mantendo a mesma altura visual que os charts md=6.
+// ── Chart 6: Série temporal do JOB filtrado (processamento) ──────────────────
 const GraficoSerie: React.FC<{ data: TimeseriesItem[]; job?: string; ih?: number; vw?: number }> = ({ data, job, ih = 160, vw = W }) => {
+  const [ttIdx, setTtIdx] = useState<number | null>(null);
   if (!job) return <SemDados msg='Aplique o filtro "Job" para ver a série temporal de execuções.' />;
   if (!data.length) return <SemDados msg="Sem execuções para o JOB no período." />;
   const IH  = ih;
@@ -216,8 +214,11 @@ const GraficoSerie: React.FC<{ data: TimeseriesItem[]; job?: string; ih?: number
         ))}
         <path d={lineGen(data) || ''} fill="none" stroke="#1976d2" strokeWidth={1.5} />
         {data.map((d, i) => (
-          <circle key={i} cx={x(new Date(d.data))} cy={y(d.duracao)} r={3.5}
-                  fill={d.status === 'OK' ? '#4caf50' : '#f44336'} stroke="white" strokeWidth={0.8} />
+          <circle key={i} cx={x(new Date(d.data))} cy={y(d.duracao)} r={4}
+                  fill={d.status === 'OK' ? '#4caf50' : '#f44336'} stroke="white" strokeWidth={0.8}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setTtIdx(i)}
+                  onMouseLeave={() => setTtIdx(null)} />
         ))}
         {x.ticks(8).map(t => (
           <text key={+t} x={x(t)} y={IH + 18} textAnchor="middle" fontSize={9} fill="#888">
@@ -226,7 +227,85 @@ const GraficoSerie: React.FC<{ data: TimeseriesItem[]; job?: string; ih?: number
         ))}
         <line x1={0} x2={iw} y1={IH} y2={IH} stroke="#ccc" />
         <text x={-28} y={IH / 2} transform={`rotate(-90,-28,${IH / 2})`} textAnchor="middle" fontSize={9} fill="#999">min</text>
-        <Legend items={[{ color: '#4caf50', label: 'OK' }, { color: '#f44336', label: 'NOT OK' }]} x={iw - 90} y={-8} />
+        {ttIdx !== null && (() => {
+          const d = data[ttIdx];
+          const cx = x(new Date(d.data));
+          const cy = y(d.duracao);
+          const tx = cx + 12 > iw - 132 ? cx - 137 : cx + 12;
+          const ty = Math.max(cy - 52, 0);
+          return (
+            <g transform={`translate(${tx},${ty})`} style={{ pointerEvents: 'none' }}>
+              <rect width={126} height={44} rx={4} fill="rgba(0,0,0,0.78)" />
+              <text x={7} y={13} fontSize={9} fill="white" fontWeight="bold">
+                {new Date(d.data).toLocaleDateString('pt-BR')}
+              </text>
+              <text x={7} y={27} fontSize={9} fill="#90caf9">
+                {`Duração: ${d.duracao.toFixed(2)} min`}
+              </text>
+              <text x={7} y={40} fontSize={9} fill={d.status === 'OK' ? '#81c784' : '#ef9a9a'}>
+                {`Status: ${d.status}`}
+              </text>
+            </g>
+          );
+        })()}
+      </g>
+    </svg>
+  );
+};
+
+// ── Chart 6b: Série temporal de volume de execuções (linha) ───────────────────
+const GraficoSerieExecucoes: React.FC<{ data: VolumeData[]; ih?: number; vw?: number }> = ({ data, ih = 160, vw = W }) => {
+  const [ttIdx, setTtIdx] = useState<number | null>(null);
+  if (!data.length) return <SemDados msg="Sem execuções para o período selecionado." />;
+  const IH = ih;
+  const iw = vw - MARGIN.left - MARGIN.right;
+  const xPt = d3.scalePoint<string>().domain(data.map(d => d.data)).range([0, iw]).padding(0.1);
+  const y = d3.scaleLinear().domain([0, d3.max(data, d => d.total) || 1]).range([IH, 0]).nice();
+  const lineTotal = d3.line<VolumeData>().x(d => xPt(d.data)!).y(d => y(d.total));
+  const lineOk    = d3.line<VolumeData>().x(d => xPt(d.data)!).y(d => y(d.ok));
+  const step = Math.ceil(data.length / 8);
+  return (
+    <svg viewBox={`0 0 ${vw} ${IH + MARGIN.top + MARGIN.bottom}`} width="100%">
+      <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
+        {y.ticks(5).map(t => (
+          <g key={t}>
+            <line x1={0} x2={iw} y1={y(t)} y2={y(t)} stroke="#f0f0f0" />
+            <text x={-6} y={y(t)} dy="0.35em" textAnchor="end" fontSize={9} fill="#888">{t}</text>
+          </g>
+        ))}
+        <path d={lineOk(data) || ''}    fill="none" stroke="#4caf50" strokeWidth={1.2} strokeDasharray="4,2" opacity={0.7} />
+        <path d={lineTotal(data) || ''} fill="none" stroke="#1976d2" strokeWidth={1.5} />
+        {data.map((d, i) => (
+          <circle key={i} cx={xPt(d.data)!} cy={y(d.total)} r={4}
+                  fill={d.nok > 0 ? '#f44336' : '#4caf50'} stroke="white" strokeWidth={0.8}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={() => setTtIdx(i)}
+                  onMouseLeave={() => setTtIdx(null)} />
+        ))}
+        {data.filter((_, i) => i % step === 0).map(d => (
+          <text key={d.data} x={xPt(d.data)!} y={IH + 18} textAnchor="middle" fontSize={9} fill="#888"
+                transform={`rotate(-30,${xPt(d.data)!},${IH + 18})`}>
+            {d.data.slice(-5)}
+          </text>
+        ))}
+        <line x1={0} x2={iw} y1={IH} y2={IH} stroke="#ccc" />
+        <text x={-28} y={IH / 2} transform={`rotate(-90,-28,${IH / 2})`} textAnchor="middle" fontSize={9} fill="#999">qtd</text>
+        {ttIdx !== null && (() => {
+          const d = data[ttIdx];
+          const cx = xPt(d.data)!;
+          const cy = y(d.total);
+          const tx = cx + 12 > iw - 138 ? cx - 143 : cx + 12;
+          const ty = Math.max(cy - 62, 0);
+          return (
+            <g transform={`translate(${tx},${ty})`} style={{ pointerEvents: 'none' }}>
+              <rect width={132} height={58} rx={4} fill="rgba(0,0,0,0.78)" />
+              <text x={7} y={13} fontSize={9} fill="white" fontWeight="bold">{d.data}</text>
+              <text x={7} y={27} fontSize={9} fill="#90caf9">{`Total: ${d.total}`}</text>
+              <text x={7} y={40} fontSize={9} fill="#81c784">{`OK: ${d.ok}`}</text>
+              <text x={7} y={53} fontSize={9} fill="#ef9a9a">{`NOT OK: ${d.nok}`}</text>
+            </g>
+          );
+        })()}
       </g>
     </svg>
   );
@@ -347,10 +426,16 @@ const InsightCard: React.FC<{
   );
 };
 
-const ChartCard: React.FC<{ title: string; children: React.ReactNode; legend?: { color: string; label: string }[] }> = ({ title, children, legend }) => (
+const ChartCard: React.FC<{
+  title: string;
+  children: React.ReactNode;
+  legend?: { color: string; label: string }[];
+  action?: React.ReactNode;
+}> = ({ title, children, legend, action }) => (
   <Paper variant="outlined" sx={{ p: 2 }}>
-    <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
       <Typography variant="subtitle2" fontWeight={600}>{title}</Typography>
+      {action}
       {legend && (
         <Box sx={{ ml: 'auto', display: 'flex', gap: 1.5, flexWrap: 'wrap' }}>
           {legend.map(it => (
@@ -382,9 +467,26 @@ export const Tela2Execucoes: React.FC = () => {
   const [desvioInput, setDesvioInput]           = useState('50');
   const [exibirTendencia, setExibirTendencia]   = useState(false);
   const [rankingTab, setRankingTab]             = useState(0);
+  const [serieView, setSerieView]               = useState<'processamento' | 'execucoes'>('processamento');
 
   const { data, isLoading, error }   = useExecucoes(filtrosAtivos, page);
   const { data: graficos }           = useGraficosExecucoes(filtrosAtivos);
+
+  const execPorDia = useMemo((): VolumeData[] => {
+    const series = graficos?.timeseries ?? [];
+    if (!series.length) return [];
+    const byDate = new Map<string, { ok: number; nok: number }>();
+    for (const item of series) {
+      const dia = String(item.data).slice(0, 10);
+      if (!byDate.has(dia)) byDate.set(dia, { ok: 0, nok: 0 });
+      const e = byDate.get(dia)!;
+      if (item.status === 'OK') e.ok++; else e.nok++;
+    }
+    return Array.from(byDate.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([data, v]) => ({ data, ok: v.ok, nok: v.nok, total: v.ok + v.nok }));
+  }, [graficos?.timeseries]);
+
   const { data: rotinasData }        = useRotinasDisponiveis();
   const { data: slaData }            = useSlaJobs(slaMin, filtrosAtivos);
   const { data: desvioData }         = useDesvioVolumetria(desvioThreshold, filtrosAtivos);
@@ -590,15 +692,51 @@ export const Tela2Execucoes: React.FC = () => {
       </Box>
 
       {/* Série temporal — largura total, altura compacta */}
-      <ChartCard title={`Série Temporal de Execuções${filtrosAtivos.job?.[0] ? ` — ${filtrosAtivos.job[0]}` : ''}`}>
-        <GraficoSerie data={graficos?.timeseries ?? []} job={filtrosAtivos.job?.[0]} ih={160} vw={1120} />
+      <ChartCard
+        title={`Série Temporal de Execuções${filtrosAtivos.job?.[0] ? ` — ${filtrosAtivos.job[0]}` : ''}`}
+        action={
+          <Box sx={{ display: 'flex', border: '1px solid', borderColor: 'divider', borderRadius: 1, overflow: 'hidden', ml: 1 }}>
+            <Button
+              size="small" disableElevation
+              variant={serieView === 'processamento' ? 'contained' : 'text'}
+              startIcon={<TimerIcon sx={{ fontSize: 14 }} />}
+              onClick={() => setSerieView('processamento')}
+              sx={{ borderRadius: 0, px: 1.5, py: 0.4, fontSize: '0.72rem', minWidth: 0 }}
+            >
+              Processamento
+            </Button>
+            <Button
+              size="small" disableElevation
+              variant={serieView === 'execucoes' ? 'contained' : 'text'}
+              startIcon={<BarChartIcon sx={{ fontSize: 14 }} />}
+              onClick={() => setSerieView('execucoes')}
+              sx={{ borderRadius: 0, px: 1.5, py: 0.4, fontSize: '0.72rem', minWidth: 0 }}
+            >
+              Execuções
+            </Button>
+          </Box>
+        }
+        legend={serieView === 'processamento'
+          ? [{ color: '#4caf50', label: 'OK' }, { color: '#f44336', label: 'NOT OK' }]
+          : [{ color: '#1976d2', label: 'Total' }, { color: '#4caf50', label: 'OK' }, { color: '#f44336', label: 'NOT OK' }]
+        }
+      >
+        {serieView === 'processamento'
+          ? <GraficoSerie data={graficos?.timeseries ?? []} job={filtrosAtivos.job?.[0]} ih={160} vw={1120} />
+          : execPorDia.length === 0
+            ? <SemDados msg="Sem execuções para o período selecionado." />
+            : <GraficoSerieExecucoes data={execPorDia} ih={160} vw={1120} />
+        }
       </ChartCard>
 
       {/* Gráficos — grid 2 colunas */}
       <Grid container spacing={2} sx={{ mt: 2, mb: 3 }}>
         {/* Linha 1: Volume por data | Hora do dia */}
         <Grid item xs={12} md={6}>
-          <ChartCard title="Volume de Execuções por Data">
+          <ChartCard title="Volume de Execuções por Data" legend={[
+            { color: '#4caf50', label: 'OK' },
+            { color: '#f44336', label: 'NOT OK' },
+          ]}>
             <GraficoVolumeDiario data={graficos?.volume_por_data ?? []} />
           </ChartCard>
         </Grid>

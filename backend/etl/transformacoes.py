@@ -7,7 +7,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-_OK  = 'OK'
+_OK = 'OK'
 _NOK = 'NOT OK'
 
 
@@ -23,7 +23,8 @@ def agregar_processos(db: Session) -> int:
             Execucao.job,
             Execucao.grupo,
             func.count(Execucao.id).label('total'),
-            func.sum(case((Execucao.status == _OK,  1), else_=0)).label('sucesso'),
+            func.sum(case((Execucao.status == _OK,  1), else_=0)
+                     ).label('sucesso'),
             func.sum(case((Execucao.status == _NOK, 1), else_=0)).label('falha'),
             func.avg(Execucao.minutos_proc).label('duracao_media'),
             func.max(Execucao.fim).label('ultima_execucao'),
@@ -43,9 +44,9 @@ def agregar_processos(db: Session) -> int:
         _now = datetime.utcnow()
 
         for r in resultados:
-            total   = r.total   or 0
+            total = r.total or 0
             sucesso = r.sucesso or 0
-            taxa    = (sucesso / total * 100) if total > 0 else 0.0
+            taxa = (sucesso / total * 100) if total > 0 else 0.0
 
             campos = {
                 'total_execucoes':    total,
@@ -125,13 +126,17 @@ def agregar_execucoes_timeline(db: Session) -> int:
                 ))
             logger.info('Continuous Aggregate cagg_execucoes_dia atualizado')
         except Exception as cagg_err:
-            logger.info('Continuous Aggregate indisponível (não-TimescaleDB): %s', cagg_err)
+            logger.info(
+                'Continuous Aggregate indisponível (não-TimescaleDB): %s', cagg_err)
             try:
                 with engine.connect().execution_options(isolation_level='AUTOCOMMIT') as conn:
-                    conn.execute(text("REFRESH MATERIALIZED VIEW cagg_execucoes_dia"))
-                logger.info('cagg_execucoes_dia atualizado via REFRESH MATERIALIZED VIEW')
+                    conn.execute(
+                        text("REFRESH MATERIALIZED VIEW cagg_execucoes_dia"))
+                logger.info(
+                    'cagg_execucoes_dia atualizado via REFRESH MATERIALIZED VIEW')
             except Exception as mv_err:
-                logger.warning('Fallback REFRESH MATERIALIZED VIEW falhou: %s', mv_err)
+                logger.warning(
+                    'Fallback REFRESH MATERIALIZED VIEW falhou: %s', mv_err)
 
         return count
 
