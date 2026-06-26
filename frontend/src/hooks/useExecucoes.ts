@@ -36,6 +36,8 @@ export interface ResumoExecucoes {
   nok: number;
   duracao_media: number;
   job_maior_duracao: string;
+  grupo_maior_duracao?: string;
+  ambiente_maior_duracao?: string;
   maior_duracao: number;
   por_ambiente?: Record<string, ResumoAmbienteExecucao>;
 }

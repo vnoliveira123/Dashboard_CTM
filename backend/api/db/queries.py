@@ -331,12 +331,12 @@ def _graficos_via_cagg(
     else:
         total_count, ok_count, nok_count = total_raw, ok_raw, nok_raw
 
-    # Job com maior duração máxima
+    # Job com maior duração máxima (inclui grupo e ambiente)
     top_job = db.execute(text(f"""
-        SELECT job, MAX(max_dur) AS max_dur
+        SELECT job, grupo, ambiente, MAX(max_dur) AS max_dur
         FROM cagg_execucoes_dia
         WHERE {where} AND max_dur IS NOT NULL
-        GROUP BY job ORDER BY max_dur DESC LIMIT 1
+        GROUP BY job, grupo, ambiente ORDER BY max_dur DESC LIMIT 1
     """), params).fetchone()
 
     # ── Volume por data (pré-computado) ──────────────────────────────────────
@@ -411,9 +411,11 @@ def _graficos_via_cagg(
             'ok':                 ok_count,
             'nok':                nok_count,
             'duracao_media':      round(avg_dur, 2),
-            'job_maior_duracao':  top_job.job      if top_job else '-',
-            'maior_duracao':      round(float(top_job.max_dur), 2) if top_job and top_job.max_dur else 0,
-            'por_ambiente':       _por_amb,
+            'job_maior_duracao':      top_job.job       if top_job else '-',
+            'grupo_maior_duracao':    top_job.grupo     if top_job else '-',
+            'ambiente_maior_duracao': top_job.ambiente  if top_job else '-',
+            'maior_duracao':          round(float(top_job.max_dur), 2) if top_job and top_job.max_dur else 0,
+            'por_ambiente':           _por_amb,
         },
         'volume_por_data': [
             {'data': str(r.dt), 'total': _vol_total(r), 'ok': int(r.ok or 0), 'nok': int(r.nok or 0)}
@@ -442,10 +444,12 @@ def _graficos_via_orm(db: Session, base, status) -> dict:
     top_job_row = (
         base.with_entities(
             ExecucaoTimeline.job,
+            ExecucaoTimeline.grupo,
+            ExecucaoTimeline.ambiente,
             func.max(ExecucaoTimeline.duracao_minutos).label('max_dur'),
         )
         .filter(ExecucaoTimeline.duracao_minutos != None)
-        .group_by(ExecucaoTimeline.job)
+        .group_by(ExecucaoTimeline.job, ExecucaoTimeline.grupo, ExecucaoTimeline.ambiente)
         .order_by(desc('max_dur'))
         .first()
     )
@@ -499,8 +503,10 @@ def _graficos_via_orm(db: Session, base, status) -> dict:
             'ok':                ok_count,
             'nok':               nok_count,
             'duracao_media':     round(float(avg_dur), 2),
-            'job_maior_duracao': top_job_row.job if top_job_row else '-',
-            'maior_duracao':     round(float(top_job_row.max_dur), 2) if top_job_row and top_job_row.max_dur else 0,
+            'job_maior_duracao':      top_job_row.job       if top_job_row else '-',
+            'grupo_maior_duracao':    top_job_row.grupo     if top_job_row else '-',
+            'ambiente_maior_duracao': top_job_row.ambiente  if top_job_row else '-',
+            'maior_duracao':          round(float(top_job_row.max_dur), 2) if top_job_row and top_job_row.max_dur else 0,
         },
         'volume_por_data': [
             {'data': str(r.dt), 'total': r.total, 'ok': int(r.ok or 0), 'nok': int(r.nok or 0)}

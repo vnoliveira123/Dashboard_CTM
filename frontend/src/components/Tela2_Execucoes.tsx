@@ -630,27 +630,26 @@ export const Tela2Execucoes: React.FC = () => {
             </Box>
             <Box sx={{ display: 'flex', gap: 2 }}>
               <Box>
-                <Typography variant="h6" fontWeight="bold" color="success.dark" sx={{ lineHeight: 1.2 }}>
-                  {resumo?.ok?.toLocaleString('pt-BR') ?? 0}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {resumo ? Math.round(resumo.ok / (resumo.total || 1) * 100) : 0}% OK
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.7 }}>
+                  <Typography variant="h6" fontWeight="bold" color="success.dark" sx={{ lineHeight: 1.2 }}>
+                    {resumo?.ok?.toLocaleString('pt-BR') ?? 0}
+                  </Typography>
+                  <Typography variant="caption" color="success.dark" fontWeight={600}>
+                    {resumo ? `${Math.round(resumo.ok / (resumo.total || 1) * 100)}%` : '0%'}
+                  </Typography>
+                </Box>
               </Box>
               <Box>
-                <Typography variant="h6" fontWeight="bold" color="error.dark" sx={{ lineHeight: 1.2 }}>
-                  {resumo?.nok?.toLocaleString('pt-BR') ?? 0}
-                </Typography>
-                <Typography variant="caption" color="text.secondary">
-                  {resumo ? Math.round(resumo.nok / (resumo.total || 1) * 100) : 0}% NOT OK
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.7 }}>
+                  <Typography variant="h6" fontWeight="bold" color="error.dark" sx={{ lineHeight: 1.2 }}>
+                    {resumo?.nok?.toLocaleString('pt-BR') ?? 0}
+                  </Typography>
+                  <Typography variant="caption" color="error.dark" fontWeight={600}>
+                    {resumo ? `${Math.round(resumo.nok / (resumo.total || 1) * 100)}%` : '0%'}
+                  </Typography>
+                </Box>
               </Box>
             </Box>
-            <LinearProgress
-              variant="determinate"
-              value={resumo ? Math.round(resumo.ok / (resumo.total || 1) * 100) : 0}
-              sx={{ mt: 1, height: 6, borderRadius: 3, bgcolor: '#ffcdd2', '& .MuiLinearProgress-bar': { bgcolor: '#2e7d32' } }}
-            />
             {resumo?.por_ambiente && Object.keys(resumo.por_ambiente).length > 0 && (
               <Box sx={{ display: 'flex', gap: 0.5, mt: 1, pt: 0.75, borderTop: '1px solid', borderColor: 'divider' }}>
                 {Object.entries(resumo.por_ambiente).sort(([a], [b]) => a.localeCompare(b)).map(([amb, v]) => {
@@ -684,9 +683,27 @@ export const Tela2Execucoes: React.FC = () => {
         <InsightCard icon={<EmojiEventsIcon fontSize="small" />} label="Maior Duração"
           value={
             resumo?.job_maior_duracao && resumo.job_maior_duracao !== '-'
-              ? <Box><Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem' }}>
-                  {resumo.job_maior_duracao}
-                </Typography>{resumo.maior_duracao.toFixed(1)} min</Box>
+              ? <Box>
+                  <Typography variant="caption" sx={{ display: 'block', fontSize: '0.7rem', fontFamily: 'monospace' }}>
+                    {resumo.job_maior_duracao}
+                  </Typography>
+                  <Typography variant="h5" fontWeight="bold" sx={{ fontSize: '1.3rem', lineHeight: 1.2 }}>
+                    {resumo.maior_duracao.toFixed(1)} min
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 0.5, mt: 0.5, flexWrap: 'wrap' }}>
+                    {resumo.grupo_maior_duracao && resumo.grupo_maior_duracao !== '-' && (
+                      <Chip label={resumo.grupo_maior_duracao.split('-')[0]} size="small"
+                            variant="outlined" color="primary" sx={{ height: 18, fontSize: '0.65rem' }} />
+                    )}
+                    {resumo.ambiente_maior_duracao && resumo.ambiente_maior_duracao !== '-' && (() => {
+                      const c = AMB_COLORS[resumo.ambiente_maior_duracao] ?? { bg: '#f5f5f5', text: '#555' };
+                      return (
+                        <Chip label={resumo.ambiente_maior_duracao} size="small"
+                              sx={{ height: 18, fontSize: '0.65rem', bgcolor: c.bg, color: c.text, fontWeight: 700, border: 'none' }} />
+                      );
+                    })()}
+                  </Box>
+                </Box>
               : '-'
           } color="#7b1fa2" />
       </Box>
