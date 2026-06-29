@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from api.db.database import get_db
 from api.db.queries import (
@@ -7,6 +8,8 @@ from api.db.queries import (
 )
 from api.middleware.cache import get_or_cache
 from typing import Optional, List
+import io
+import csv
 
 router = APIRouter()
 
@@ -97,6 +100,43 @@ async def obter_sla_jobs(
     return {"jobs": jobs, "sla_minutos": sla_minutos}
 
 
+@router.get("/exportar")
+async def exportar_execucoes(
+    tabela: List[str] = Query(default=[]),
+    job: List[str] = Query(default=[]),
+    grupo: List[str] = Query(default=[]),
+    rotina: List[str] = Query(default=[]),
+    ambiente: List[str] = Query(default=[]),
+    data_inicio: Optional[str] = Query(None),
+    data_fim: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    resultado = get_execucoes(
+        db, skip=0, limit=5000,
+        tabelas=tabela, jobs=job, grupos=grupo,
+        rotinas=rotina, data_inicio=data_inicio, data_fim=data_fim,
+        status=status, ambientes=ambiente or None,
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=';')
+    writer.writerow(['Tabela', 'Job', 'Grupo', 'Data Execução', 'Status', 'Duração (min)', 'Ambiente'])
+    for e in resultado['execucoes']:
+        writer.writerow([
+            e.tabela, e.job, e.grupo,
+            e.data_execucao.strftime('%d/%m/%Y %H:%M:%S') if e.data_execucao else '',
+            e.status,
+            round(float(e.duracao_minutos), 2) if e.duracao_minutos else '',
+            e.ambiente or '',
+        ])
+    content = b'\xef\xbb\xbf' + buf.getvalue().encode('utf-8')
+    return StreamingResponse(
+        iter([content]),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename="execucoes.csv"'},
+    )
+
+
 @router.get("/graficos")
 async def obter_graficos(
     tabela: List[str] = Query(default=[]),
@@ -109,11 +149,23 @@ async def obter_graficos(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return get_execucoes_graficos(
-        db,
-        tabelas=tabela, jobs=job, grupos=grupo,
-        rotinas=rotina, data_inicio=data_inicio, data_fim=data_fim,
-        status=status, ambientes=ambiente or None,
+    cache_key = (
+        f"cache:execucoes:graficos"
+        f":t={'|'.join(sorted(tabela))}"
+        f":j={'|'.join(sorted(job))}"
+        f":g={'|'.join(sorted(grupo))}"
+        f":r={'|'.join(sorted(rotina))}"
+        f":a={'|'.join(sorted(ambiente))}"
+        f":di={data_inicio or ''}:df={data_fim or ''}:s={status or ''}"
+    )
+    return get_or_cache(
+        cache_key, 300,
+        lambda: get_execucoes_graficos(
+            db,
+            tabelas=tabela, jobs=job, grupos=grupo,
+            rotinas=rotina, data_inicio=data_inicio, data_fim=data_fim,
+            status=status, ambientes=ambiente or None,
+        ),
     )
 
 

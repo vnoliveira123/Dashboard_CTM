@@ -4,10 +4,11 @@ import {
   Box, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Paper, TextField, Button, CircularProgress, Alert, Pagination, Card,
   CardContent, Typography, Chip, FormControl, InputLabel, Select, MenuItem,
-  OutlinedInput, Checkbox, ListItemText, Divider, Collapse, Grid, Autocomplete, LinearProgress,
+  OutlinedInput, Checkbox, ListItemText, Divider, Collapse, Grid, Autocomplete, LinearProgress, Tooltip,
 } from '@mui/material';
 import FilterListIcon          from '@mui/icons-material/FilterList';
 import ClearIcon               from '@mui/icons-material/Clear';
+import DownloadIcon            from '@mui/icons-material/Download';
 import WorkIcon                from '@mui/icons-material/Work';
 import TableChartIcon          from '@mui/icons-material/TableChart';
 import AutorenewIcon           from '@mui/icons-material/Autorenew';
@@ -22,6 +23,12 @@ import {
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+const temFiltroAtivoProcesso = (f: FiltrosProcesso): boolean =>
+  !!f.tabela || !!f.job || !!f.rotina || !!f.grupo ||
+  !!f.periodicidade || !!f.tasktype || !!f.carga || !!f.isd ||
+  !!f.tem_alerta || !!f.tipo_alerta || (f.ambiente?.length ?? 0) > 0;
 const GRUPOS      = ['PR12', 'PR21', 'PR31', 'PR41'];
 const AMBIENTES   = ['AL1', 'MZ1'];
 const AMB_COLORS: Record<string, { bg: string; text: string }> = {
@@ -268,10 +275,12 @@ export const Tela1Processos: React.FC = () => {
   const [page, setPage]                   = useState(1);
   const [expandido, setExpandido]         = useState(true);
 
+  const filtroAtivo = temFiltroAtivoProcesso(filtrosAtivos);
+
 const { data, isLoading, error } = useProcessos(filtrosAtivos, page);
   const { data: opcoes }           = useFiltrosDisponiveis();
   const { data: graficos }         = useGraficosProcessos(filtrosAtivos);
-  const { data: semExec }          = useJobsSemExecucao(50);
+  const { data: semExec }          = useJobsSemExecucao(50, filtrosAtivos);
   const { data: alertasNP }        = useAlertasNaoPadrao({
     tabela:      filtrosAtivos.tabela      || undefined,
     job:         filtrosAtivos.job         || undefined,
@@ -285,7 +294,60 @@ const { data, isLoading, error } = useProcessos(filtrosAtivos, page);
     rotina:         filtrosAtivos.rotina         || undefined,
     grupo:          filtrosAtivos.grupo          || undefined,
     horarios_carga: filtrosAtivos.horarios_carga?.length ? filtrosAtivos.horarios_carga : undefined,
-  });
+  }, filtroAtivo);
+
+  const dispararDownload = (nomeArquivo: string, linhas: string[]) => {
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, linhas.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', nomeArquivo);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const csvLinha = (campos: unknown[]) =>
+    campos.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+
+  const exportarCSVProcessos = () => {
+    const p = new URLSearchParams();
+    if (filtrosAtivos.tabela)        p.append('tabela',        filtrosAtivos.tabela);
+    if (filtrosAtivos.job)           p.append('job',           filtrosAtivos.job);
+    if (filtrosAtivos.rotina)        p.append('rotina',        filtrosAtivos.rotina);
+    if (filtrosAtivos.grupo)         p.append('grupo',         filtrosAtivos.grupo);
+    if (filtrosAtivos.periodicidade) p.append('periodicidade', filtrosAtivos.periodicidade);
+    if (filtrosAtivos.tasktype)      p.append('tasktype',      filtrosAtivos.tasktype);
+    if (filtrosAtivos.carga)         p.append('carga',         filtrosAtivos.carga);
+    if (filtrosAtivos.isd)           p.append('isd',           filtrosAtivos.isd);
+    if (filtrosAtivos.tem_alerta)    p.append('tem_alerta',    filtrosAtivos.tem_alerta);
+    if (filtrosAtivos.tipo_alerta)   p.append('tipo_alerta',   filtrosAtivos.tipo_alerta);
+    (filtrosAtivos.ambiente ?? []).forEach(v => p.append('ambiente', v));
+    const url = `${API_URL}/api/processos/exportar?${p}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `processos_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportarCSVJanela = () => {
+    if (!janelaData?.janela.length) return;
+    const header = csvLinha(['Tabela','Grupo','Horário CTM','Última Execução','Primeiro Início','Atraso (min)','Situação']);
+    const linhas = (janelaData.janela as JanelaCargaItem[]).map(j => csvLinha([
+      j.tabela, j.grupo?.split('-')[0] ?? j.grupo,
+      `${String(j.hora_programada).padStart(2,'0')}h00`,
+      j.dia,
+      `${String(j.hora_real).padStart(2,'0')}:${String(j.min_real).padStart(2,'0')}`,
+      j.delta_minutos,
+      j.status === 'no_prazo' ? 'No Prazo' : 'Atrasada',
+    ]));
+    dispararDownload(`janela_carga_${new Date().toISOString().slice(0,10)}.csv`, [header, ...linhas]);
+  };
 
   const set = (campo: keyof FiltrosProcesso) => (valor: any) => {
     setFiltros(prev => {
@@ -599,118 +661,144 @@ const { data, isLoading, error } = useProcessos(filtrosAtivos, page);
               );
             })()}
           </Box>
-          {!janelaData?.janela.length ? (
+          {!filtroAtivo ? (
+            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
+              Configure um filtro para analisar a janela de carga.
+            </Typography>
+          ) : !janelaData?.janela.length ? (
             <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic' }}>
               Nenhuma tabela com carga programada encontrada nos últimos 7 dias.
             </Typography>
           ) : (
             <Box sx={{ maxHeight: 320, overflowY: 'auto' }}>
-              <Table size="small" sx={{ width: '100%' }}>
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'primary.main' }}>
-                    {['Tabela', 'Grupo', 'Horário CTM', 'Última Execução', 'Primeiro Início', 'Atraso', 'Situação'].map(c => (
-                      <TableCell key={c} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{c}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {(janelaData?.janela ?? []).map((j: JanelaCargaItem, i: number) => (
-                    <TableRow key={i} hover>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.tabela}</TableCell>
-                      <TableCell>
-                        <Chip label={j.grupo?.split('-')[0] ?? j.grupo} size="small" variant="outlined" color="primary" />
-                      </TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>{String(j.hora_programada).padStart(2, '0')}h00</TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>{j.dia}</TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>
-                        {String(j.hora_real).padStart(2, '0')}:{String(j.min_real).padStart(2, '0')}
-                      </TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem', color: j.delta_minutos > 30 ? 'error.main' : 'text.primary', fontWeight: j.delta_minutos > 30 ? 600 : 400 }}>
-                        {j.delta_minutos > 0 ? `+${j.delta_minutos} min` : '—'}
-                      </TableCell>
-                      <TableCell>
-                        <Chip
-                          label={j.status === 'no_prazo' ? 'No Prazo' : 'Atrasada'}
-                          size="small"
-                          color={j.status === 'no_prazo' ? 'success' : 'error'}
-                        />
-                      </TableCell>
+                <Table size="small" sx={{ width: '100%' }}>
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: 'primary.main' }}>
+                      {['Tabela', 'Grupo', 'Horário CTM', 'Última Execução', 'Primeiro Início', 'Atraso', 'Situação'].map(c => (
+                        <TableCell key={c} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{c}</TableCell>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Box>
+                  </TableHead>
+                  <TableBody>
+                    {(janelaData?.janela ?? []).map((j: JanelaCargaItem, i: number) => (
+                      <TableRow key={i} hover>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.tabela}</TableCell>
+                        <TableCell>
+                          <Chip label={j.grupo?.split('-')[0] ?? j.grupo} size="small" variant="outlined" color="primary" />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{String(j.hora_programada).padStart(2, '0')}h00</TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{j.dia}</TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>
+                          {String(j.hora_real).padStart(2, '0')}:{String(j.min_real).padStart(2, '0')}
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem', color: j.delta_minutos > 30 ? 'error.main' : 'text.primary', fontWeight: j.delta_minutos > 30 ? 600 : 400 }}>
+                          {j.delta_minutos > 0 ? `+${j.delta_minutos} min` : '—'}
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={j.status === 'no_prazo' ? 'No Prazo' : 'Atrasada'}
+                            size="small"
+                            color={j.status === 'no_prazo' ? 'success' : 'error'}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </Box>
           )}
         </CardContent>
       </Card>
 
       {/* ── Tabela ── */}
-      {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>}
-      {error && <Alert severity="error">Erro ao carregar processos. Verifique se a API está respondendo.</Alert>}
-
-      {data && !isLoading && (
+      {!filtroAtivo ? (
+        <Box sx={{ textAlign: 'center', py: 8, color: 'text.disabled' }}>
+          <FilterListIcon sx={{ fontSize: 52, mb: 1.5, opacity: 0.25 }} />
+          <Typography variant="body1" fontWeight={500} color="text.secondary">
+            Configure um filtro para visualizar os processos
+          </Typography>
+          <Typography variant="caption" color="text.disabled">
+            Use os campos acima para filtrar por tabela, job, grupo, periodicidade ou ambiente.
+          </Typography>
+        </Box>
+      ) : (
         <>
-          {data.processos.length === 0 ? (
-            <Alert severity="info">Nenhum processo encontrado para os filtros selecionados.</Alert>
-          ) : (
-            <TableContainer component={Paper} variant="outlined">
-              <Table size="small">
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'primary.main' }}>
-                    {['Tabela','Job','Grupo','Tipo','Periodicidade','Carga','Horário','ISD','Confirm','Alerta'].map(col => (
-                      <TableCell key={col} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{col}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {data.processos.map((p, idx) => (
-                    <TableRow key={idx} hover>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.tabela}</TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.job}</TableCell>
-                      <TableCell>
-                        <Chip label={p.grupo?.split('-')[0] ?? p.grupo} size="small" variant="outlined" color="primary" />
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={p.tasktype ?? '-'} size="small"
-                              color={p.tasktype === 'JOB' ? 'default' : 'secondary'} variant="outlined" />
-                      </TableCell>
-                      <TableCell>{p.periodicidade ?? '-'}</TableCell>
-                      <TableCell>
-                        {p.carga === 'SIM'
-                          ? <Chip label={`Sim • ${p.horario_carga}h`} size="small" color="success" />
-                          : <Chip label="Não" size="small" variant="outlined" />}
-                      </TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>
-                        {p.fromtime && p.untiltime ? `${p.fromtime} – ${p.untiltime}` : '-'}
-                      </TableCell>
-                      <TableCell>
-                        {p.isd === 'SIM'
-                          ? <Chip label="Sim" size="small" color="warning" />
-                          : <Chip label="Não" size="small" variant="outlined" />}
-                      </TableCell>
-                      <TableCell>
-                        {p.confirm === 'Y' ? <Chip label="Sim" size="small" color="info" /> : '-'}
-                      </TableCell>
-                      <TableCell>
-                        {p.tem_alerta
-                          ? p.tipo_alerta === 'U-ECS'
-                            ? <Chip label="U-ECS (Padrão)" size="small" color="success" />
-                            : <Chip label={`${p.tipo_alerta ?? 'Alerta'} (Fora padrão)`} size="small" color="error" />
-                          : <Chip label="Não" size="small" variant="outlined" />}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+          {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>}
+          {error && <Alert severity="error">Erro ao carregar processos. Verifique se a API está respondendo.</Alert>}
+          {data && !isLoading && (
+            <>
+              {data.processos.length === 0 ? (
+                <Alert severity="info">Nenhum processo encontrado para os filtros selecionados.</Alert>
+              ) : (
+                <>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                    <Typography variant="caption" color="text.secondary">
+                      {data.total} registro{data.total !== 1 ? 's' : ''} encontrado{data.total !== 1 ? 's' : ''}
+                    </Typography>
+                    <Tooltip title="Exportar até 5.000 registros com os filtros atuais">
+                      <Button size="small" startIcon={<DownloadIcon />} onClick={exportarCSVProcessos} variant="outlined" sx={{ fontSize: '0.75rem' }}>
+                        Exportar CSV
+                      </Button>
+                    </Tooltip>
+                  </Box>
+                  <TableContainer component={Paper} variant="outlined">
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow sx={{ bgcolor: 'primary.main' }}>
+                          {['Tabela','Job','Grupo','Tipo','Periodicidade','Carga','Horário','ISD','Confirm','Alerta'].map(col => (
+                            <TableCell key={col} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{col}</TableCell>
+                          ))}
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {data.processos.map((p, idx) => (
+                          <TableRow key={idx} hover>
+                            <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.tabela}</TableCell>
+                            <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{p.job}</TableCell>
+                            <TableCell>
+                              <Chip label={p.grupo?.split('-')[0] ?? p.grupo} size="small" variant="outlined" color="primary" />
+                            </TableCell>
+                            <TableCell>
+                              <Chip label={p.tasktype ?? '-'} size="small"
+                                    color={p.tasktype === 'JOB' ? 'default' : 'secondary'} variant="outlined" />
+                            </TableCell>
+                            <TableCell>{p.periodicidade ?? '-'}</TableCell>
+                            <TableCell>
+                              {p.carga === 'SIM'
+                                ? <Chip label={`Sim • ${p.horario_carga}h`} size="small" color="success" />
+                                : <Chip label="Não" size="small" variant="outlined" />}
+                            </TableCell>
+                            <TableCell sx={{ fontSize: '0.8rem' }}>
+                              {p.fromtime && p.untiltime ? `${p.fromtime} – ${p.untiltime}` : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {p.isd === 'SIM'
+                                ? <Chip label="Sim" size="small" color="warning" />
+                                : <Chip label="Não" size="small" variant="outlined" />}
+                            </TableCell>
+                            <TableCell>
+                              {p.confirm === 'Y' ? <Chip label="Sim" size="small" color="info" /> : '-'}
+                            </TableCell>
+                            <TableCell>
+                              {p.tem_alerta
+                                ? p.tipo_alerta === 'U-ECS'
+                                  ? <Chip label="U-ECS (Padrão)" size="small" color="success" />
+                                  : <Chip label={`${p.tipo_alerta ?? 'Alerta'} (Fora padrão)`} size="small" color="error" />
+                                : <Chip label="Não" size="small" variant="outlined" />}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                </>
+              )}
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination count={totalPaginas} page={page} onChange={(_, v) => setPage(v)}
+                            color="primary" size="small" />
+              </Box>
+            </>
           )}
-          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.secondary">
-              {data.total} registro{data.total !== 1 ? 's' : ''} encontrado{data.total !== 1 ? 's' : ''}
-            </Typography>
-            <Pagination count={totalPaginas} page={page} onChange={(_, v) => setPage(v)}
-                        color="primary" size="small" />
-          </Box>
         </>
       )}
     </Box>

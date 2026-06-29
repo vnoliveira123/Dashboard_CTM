@@ -78,9 +78,10 @@ export interface RespostaProcessos {
   limit: number;
 }
 
-export const useProcessos = (filtros: FiltrosProcesso = {}, page: number = 1) => {
+export const useProcessos = (filtros: FiltrosProcesso = {}, page: number = 1, enabled = true) => {
   return useQuery<RespostaProcessos>({
     queryKey: ['processos', filtros, page],
+    enabled,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (filtros.tabela) params.append('tabela', filtros.tabela);
@@ -157,13 +158,19 @@ export interface AlertaNaoPadrao {
   total_exec: number;
 }
 
-export const useJobsSemExecucao = (limit = 50) =>
+export const useJobsSemExecucao = (limit = 50, filtros: FiltrosProcesso = {}) =>
   useQuery<{ jobs: JobSemExecucao[]; total: number }>({
-    queryKey: ['processos-sem-execucao', limit],
+    queryKey: ['processos-sem-execucao', limit, filtros],
     queryFn: async () => {
-      const { data } = await axios.get(
-        `${API_URL}/api/processos/sem-execucao?limit=${limit}`,
-      );
+      const p = new URLSearchParams({ limit: String(limit) });
+      if (filtros.tabela) p.append('tabela', filtros.tabela);
+      if (filtros.job)    p.append('job',    filtros.job);
+      if (filtros.grupo)  p.append('grupo',  filtros.grupo);
+      if (filtros.rotina) p.append('rotina', filtros.rotina);
+      if (filtros.carga)  p.append('carga',  filtros.carga);
+      if (filtros.isd)    p.append('isd',    filtros.isd);
+      (filtros.ambiente ?? []).forEach(v => p.append('ambiente', v));
+      const { data } = await axios.get(`${API_URL}/api/processos/sem-execucao?${p}`);
       return data;
     },
     staleTime: 5 * 60 * 1000,
@@ -215,9 +222,10 @@ export interface JanelaCargaFiltros {
   horarios_carga?: string[];
 }
 
-export const useJanelaCarga = (filtros: JanelaCargaFiltros = {}) =>
+export const useJanelaCarga = (filtros: JanelaCargaFiltros = {}, enabled = true) =>
   useQuery<{ janela: JanelaCargaItem[] }>({
     queryKey: ['processos-janela-carga', filtros],
+    enabled,
     queryFn: async () => {
       const p = new URLSearchParams();
       if (filtros.dias)                      p.append('dias',           String(filtros.dias ?? 7));

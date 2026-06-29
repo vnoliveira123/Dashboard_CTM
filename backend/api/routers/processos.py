@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Query, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from api.db.database import get_db
 from api.db.queries import (
@@ -9,6 +10,8 @@ from api.db.queries import (
 )
 from api.middleware.cache import get_or_cache
 from typing import Optional, List
+import io
+import csv
 
 router = APIRouter()
 
@@ -55,13 +58,29 @@ async def obter_graficos_processos(
 
 @router.get("/sem-execucao")
 async def listar_jobs_sem_execucao(
-    limit: int = Query(50, ge=1, le=200),
+    limit:    int           = Query(50, ge=1, le=200),
+    tabela:   Optional[str] = Query(None),
+    job:      Optional[str] = Query(None),
+    grupo:    Optional[str] = Query(None),
+    rotina:   Optional[str] = Query(None),
+    carga:    Optional[str] = Query(None),
+    isd:      Optional[str] = Query(None),
+    ambiente: List[str]     = Query(default=[]),
     db: Session = Depends(get_db),
 ):
+    cache_key = (
+        f"cache:processos:sem-execucao:{limit}"
+        f":{tabela or ''}:{job or ''}:{grupo or ''}:{rotina or ''}"
+        f":{carga or ''}:{isd or ''}:{','.join(sorted(ambiente))}"
+    )
     def _fetch():
-        jobs = get_jobs_sem_execucao(db, limit=limit)
+        jobs = get_jobs_sem_execucao(
+            db, limit=limit,
+            tabela=tabela, job=job, grupo=grupo, rotina=rotina,
+            carga=carga, isd=isd, ambientes=ambiente or None,
+        )
         return {"jobs": jobs, "total": len(jobs)}
-    return get_or_cache(f"cache:processos:sem-execucao:{limit}", 600, _fetch)
+    return get_or_cache(cache_key, 600, _fetch)
 
 
 @router.get("/janela-carga")
@@ -100,6 +119,60 @@ async def listar_alertas_nao_padrao(
         lambda: {"alertas": get_alertas_nao_padrao(
             db, tabela=tabela, job=job, rotina=rotina, grupo=grupo, tipo_alerta=tipo_alerta,
         )},
+    )
+
+
+@router.get("/exportar")
+async def exportar_processos(
+    tabela: Optional[str] = Query(None),
+    job: Optional[str] = Query(None),
+    rotina: Optional[str] = Query(None),
+    grupo: Optional[str] = Query(None),
+    periodicidade: Optional[str] = Query(None),
+    tasktype: Optional[str] = Query(None),
+    confirm: Optional[str] = Query(None),
+    memlib: Optional[str] = Query(None),
+    carga: Optional[str] = Query(None),
+    horarios_carga: Optional[str] = Query(None),
+    isd: Optional[str] = Query(None),
+    evento_isd: Optional[str] = Query(None),
+    tem_alerta: Optional[str] = Query(None),
+    padrao: Optional[str] = Query(None),
+    tipo_alerta: Optional[str] = Query(None),
+    ambiente: List[str] = Query(default=[]),
+    db: Session = Depends(get_db),
+):
+    tem_alerta_bool = None
+    if tem_alerta == 'SIM':   tem_alerta_bool = True
+    elif tem_alerta == 'NAO': tem_alerta_bool = False
+    horarios_list: Optional[List[str]] = None
+    if horarios_carga:
+        horarios_list = [h.strip() for h in horarios_carga.split(',') if h.strip()]
+
+    resultado = get_processos(
+        db, skip=0, limit=5000,
+        tabela=tabela, job=job, rotina=rotina, grupo_prefix=grupo,
+        periodicidade=periodicidade, tasktype=tasktype, confirm=confirm, memlib=memlib,
+        carga=carga, horarios_carga=horarios_list,
+        isd=isd, evento_isd=evento_isd,
+        tem_alerta=tem_alerta_bool, padrao=padrao, tipo_alerta=tipo_alerta,
+        ambientes=ambiente or None,
+    )
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=';')
+    writer.writerow(['Tabela', 'Job', 'Grupo', 'Tasktype', 'Periodicidade', 'Carga', 'ISD', 'Tem Alerta', 'Tipo Alerta', 'Ambiente'])
+    for p in resultado['processos']:
+        writer.writerow([
+            p.tabela, p.job, p.grupo,
+            p.tasktype or '', p.periodicidade or '', p.carga or '',
+            p.isd or '', 'SIM' if p.tem_alerta else 'NAO',
+            p.tipo_alerta or '', p.ambiente or '',
+        ])
+    content = b'\xef\xbb\xbf' + buf.getvalue().encode('utf-8')
+    return StreamingResponse(
+        iter([content]),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition': 'attachment; filename="processos.csv"'},
     )
 
 

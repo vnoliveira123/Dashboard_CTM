@@ -4,10 +4,11 @@ import {
   Box, Paper, Typography, TextField, Button, Chip, CircularProgress, Alert,
   Pagination, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   FormControl, InputLabel, Select, MenuItem, Divider, Collapse, Card, CardContent, Grid,
-  Autocomplete, Checkbox, LinearProgress, Tabs, Tab,
+  Autocomplete, Checkbox, LinearProgress, Tabs, Tab, Tooltip,
 } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ClearIcon from '@mui/icons-material/Clear';
+import DownloadIcon from '@mui/icons-material/Download';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import TimerIcon from '@mui/icons-material/Timer';
@@ -17,8 +18,18 @@ import {
   useExecucoes, useGraficosExecucoes, useRotinasDisponiveis, useSlaJobs,
   useDesvioVolumetria, useTendenciaDuracao, useMultiplasPorDia,
   FiltrosExecucao, VolumeData, TopDurData, HoraData, IsdData, TimeseriesItem, SlaItem,
-  DesvioVolumetriaItem, TendenciaDuracaoItem, MultiplasItem,
+  DesvioVolumetriaItem, TendenciaDuracaoItem, MultiplasItem, buildParams,
 } from '../hooks/useExecucoes';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+const temFiltroAtivo = (f: FiltrosExecucao): boolean =>
+  (f.tabela?.length ?? 0) > 0 ||
+  (f.job?.length ?? 0) > 0 ||
+  (f.grupo?.length ?? 0) > 0 ||
+  (f.rotina?.length ?? 0) > 0 ||
+  (f.ambiente?.length ?? 0) > 0 ||
+  !!f.data_inicio || !!f.data_fim || !!f.status;
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import BarChartIcon   from '@mui/icons-material/BarChart';
 
@@ -41,9 +52,15 @@ const W = 560;
 const MARGIN = { top: 16, right: 24, bottom: 46, left: 52 };
 const IW = W - MARGIN.left - MARGIN.right;
 
-function Eixo({ scale, ticks, orient, innerSize }: {
+const formatarData = (iso: string): string => {
+  const p = iso.split('-');
+  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : iso;
+};
+
+function Eixo({ scale, ticks, orient, innerSize, tickFormat }: {
   scale: d3.ScaleLinear<number,number> | d3.ScaleBand<string>;
   ticks?: number[]; orient: 'bottom'|'left'; innerSize: number;
+  tickFormat?: (v: string) => string;
 }) {
   if (orient === 'bottom') {
     const band = scale as d3.ScaleBand<string>;
@@ -56,7 +73,7 @@ function Eixo({ scale, ticks, orient, innerSize }: {
           <text key={v} x={(band(v) || 0) + band.bandwidth() / 2}
                 y={18} textAnchor="middle" fontSize={9} fill="#888"
                 transform={`rotate(-30,${(band(v) || 0) + band.bandwidth() / 2},18)`}>
-            {v.length > 7 ? v.slice(-7) : v}
+            {tickFormat ? tickFormat(v) : v}
           </text>
         ))}
       </g>
@@ -86,7 +103,7 @@ const GraficoVolumeDiario: React.FC<{ data: VolumeData[] }> = ({ data }) => {
     <svg viewBox={`0 0 ${W} ${IH + MARGIN.top + MARGIN.bottom}`} width="100%">
       <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
         <Eixo scale={y} orient="left" innerSize={IH} />
-        <Eixo scale={x} orient="bottom" innerSize={IH} />
+        <Eixo scale={x} orient="bottom" innerSize={IH} tickFormat={formatarData} />
         {data.map(d => (
           <g key={d.data}>
             <rect x={x(d.data)!} y={y(d.ok)} width={x.bandwidth()} height={IH - y(d.ok)}
@@ -119,7 +136,8 @@ const GraficoMultiplas: React.FC<{ rows: MultiplasItem[] }> = ({ rows }) => {
             <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Máx/dia</TableCell>
             <TableCell sx={{ width: 100 }} />
             <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Dias</TableCell>
-            <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Total</TableCell>
+            <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Execuções</TableCell>
+            <TableCell sx={{ fontWeight: 'bold', fontSize: '0.75rem', whiteSpace: 'nowrap' }}>Jobs</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -134,6 +152,7 @@ const GraficoMultiplas: React.FC<{ rows: MultiplasItem[] }> = ({ rows }) => {
               </TableCell>
               <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{r.dias_com_multiplas}</TableCell>
               <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{r.total_execucoes.toLocaleString('pt-BR')}</TableCell>
+              <TableCell sx={{ fontSize: '0.75rem', color: 'text.secondary' }}>{r.total_jobs ?? '-'}</TableCell>
             </TableRow>
           ))}
         </TableBody>
@@ -151,7 +170,7 @@ const GraficoHorario: React.FC<{ data: HoraData[] }> = ({ data }) => {
   data.forEach(d => {
     allHours[d.hora] = { hora: d.hora, total: d.total, ok: d.ok ?? 0, nok: d.nok ?? 0 };
   });
-  const worstHora = allHours.reduce((mx, h) => h.nok > mx.nok ? h : mx, allHours[0]);
+  const worstHora = allHours.reduce((mx, h) => h.total > mx.total ? h : mx, allHours[0]);
   const IH = 160;
   const x = d3.scaleBand().domain(allHours.map(d => String(d.hora))).range([0, IW]).padding(0.15);
   const y = d3.scaleLinear().domain([0, d3.max(allHours, d => d.total) || 1]).range([IH, 0]).nice();
@@ -162,7 +181,7 @@ const GraficoHorario: React.FC<{ data: HoraData[] }> = ({ data }) => {
         {allHours.map(d => {
           const bx = x(String(d.hora))!;
           const bw = x.bandwidth();
-          const isWorst = d.hora === worstHora.hora && d.nok > 0;
+          const isWorst = d.hora === worstHora.hora && d.total > 0;
           return (
             <g key={d.hora}>
               {isWorst && (
@@ -285,7 +304,7 @@ const GraficoSerieExecucoes: React.FC<{ data: VolumeData[]; ih?: number; vw?: nu
         {data.filter((_, i) => i % step === 0).map(d => (
           <text key={d.data} x={xPt(d.data)!} y={IH + 18} textAnchor="middle" fontSize={9} fill="#888"
                 transform={`rotate(-30,${xPt(d.data)!},${IH + 18})`}>
-            {d.data.slice(-5)}
+            {formatarData(d.data)}
           </text>
         ))}
         <line x1={0} x2={iw} y1={IH} y2={IH} stroke="#ccc" />
@@ -469,7 +488,9 @@ export const Tela2Execucoes: React.FC = () => {
   const [rankingTab, setRankingTab]             = useState(0);
   const [serieView, setSerieView]               = useState<'processamento' | 'execucoes'>('processamento');
 
-  const { data, isLoading, error }   = useExecucoes(filtrosAtivos, page);
+  const filtroAtivo = temFiltroAtivo(filtrosAtivos);
+
+  const { data, isLoading, error }   = useExecucoes(filtrosAtivos, page, filtroAtivo);
   const { data: graficos }           = useGraficosExecucoes(filtrosAtivos);
 
   const execPorDia = useMemo((): VolumeData[] => {
@@ -488,9 +509,9 @@ export const Tela2Execucoes: React.FC = () => {
   }, [graficos?.timeseries]);
 
   const { data: rotinasData }        = useRotinasDisponiveis();
-  const { data: slaData }            = useSlaJobs(slaMin, filtrosAtivos);
-  const { data: desvioData }         = useDesvioVolumetria(desvioThreshold, filtrosAtivos);
-  const { data: tendenciaData }      = useTendenciaDuracao(filtrosAtivos);
+  const { data: slaData }            = useSlaJobs(slaMin, filtrosAtivos, filtroAtivo);
+  const { data: desvioData }         = useDesvioVolumetria(desvioThreshold, filtrosAtivos, filtroAtivo);
+  const { data: tendenciaData }      = useTendenciaDuracao(filtrosAtivos, filtroAtivo);
   const { data: multiplasData }      = useMultiplasPorDia(filtrosAtivos);
 
   const setStr = (campo: 'data_inicio' | 'data_fim' | 'status') => (v: string) =>
@@ -508,6 +529,41 @@ export const Tela2Execucoes: React.FC = () => {
   const limpar = () => {
     setFiltros(getFiltrosIniciais()); setFiltrosAtivos(getFiltrosIniciais());
     setTabelaInput(''); setJobInput(''); setPage(1);
+  };
+
+  const dispararDownload = (nomeArquivo: string, linhas: string[]) => {
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, linhas.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', nomeArquivo);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const csvLinha = (campos: unknown[]) =>
+    campos.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',');
+
+  const exportarCSV = () => {
+    const p = buildParams(filtrosAtivos, { limit: '5000', page: '1' });
+    const url = `${API_URL}/api/execucoes/exportar?${p}`;
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `execucoes_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportarCSVSla = () => {
+    if (!slaData?.jobs.length) return;
+    const header = csvLinha(['Tabela', 'Job', 'Grupo', 'Duração Média (min)', 'Duração Máx (min)', 'Execuções']);
+    const linhas = slaData.jobs.map((j: SlaItem) => csvLinha([j.tabela, j.job, j.grupo, j.avg_dur, j.max_dur, j.total_exec]));
+    dispararDownload(`sla_jobs_${new Date().toISOString().slice(0, 10)}.csv`, [header, ...linhas]);
   };
 
   const resumo = graficos?.resumo;
@@ -795,7 +851,7 @@ export const Tela2Execucoes: React.FC = () => {
         >
           <SpeedIcon fontSize="small" color="warning" />
           <Typography variant="subtitle2" fontWeight={600}>SLA por Job — Duração Média Acima do Limiar</Typography>
-          {slaData?.jobs.length ? (
+          {filtroAtivo && slaData?.jobs.length ? (
             <Chip label={`${slaData.jobs.length} job${slaData.jobs.length !== 1 ? 's' : ''}`} size="small" color="warning" sx={{ ml: 0.5 }} />
           ) : null}
           {/* Input de limiar no cabeçalho — para não perder ao colapsar */}
@@ -815,38 +871,51 @@ export const Tela2Execucoes: React.FC = () => {
         </Box>
         <Collapse in={exibirSla}>
           <Divider />
-          {!slaData?.jobs.length ? (
+          {!filtroAtivo ? (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
+              Configure um filtro para analisar o SLA por job.
+            </Typography>
+          ) : !slaData?.jobs.length ? (
             <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
               Nenhum job com duração média acima de {slaMin} min.
             </Typography>
           ) : (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow sx={{ bgcolor: 'warning.light' }}>
-                    {['Tabela', 'Job', 'Grupo', 'Duração Média (min)', 'Duração Máx (min)', 'Execuções'].map(c => (
-                      <TableCell key={c} sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{c}</TableCell>
-                    ))}
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {(slaData?.jobs ?? []).map((j: SlaItem, i: number) => (
-                    <TableRow key={i} hover>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.tabela}</TableCell>
-                      <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.job}</TableCell>
-                      <TableCell>
-                        <Chip label={j.grupo?.split('-')[0] || '-'} size="small" variant="outlined" color="primary" />
-                      </TableCell>
-                      <TableCell>
-                        <Chip label={`${j.avg_dur.toFixed(1)} min`} size="small" color="warning" />
-                      </TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>{j.max_dur.toFixed(1)}</TableCell>
-                      <TableCell sx={{ fontSize: '0.8rem' }}>{j.total_exec.toLocaleString('pt-BR')}</TableCell>
+            <>
+              <Box sx={{ display: 'flex', justifyContent: 'flex-end', px: 2, pt: 1 }}>
+                <Tooltip title="Exportar dados exibidos em CSV">
+                  <Button size="small" startIcon={<DownloadIcon />} onClick={exportarCSVSla} variant="outlined" sx={{ fontSize: '0.75rem' }}>
+                    Exportar CSV
+                  </Button>
+                </Tooltip>
+              </Box>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow sx={{ bgcolor: 'warning.light' }}>
+                      {['Tabela', 'Job', 'Grupo', 'Duração Média (min)', 'Duração Máx (min)', 'Execuções'].map(c => (
+                        <TableCell key={c} sx={{ fontWeight: 'bold', whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{c}</TableCell>
+                      ))}
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+                  </TableHead>
+                  <TableBody>
+                    {(slaData?.jobs ?? []).map((j: SlaItem, i: number) => (
+                      <TableRow key={i} hover>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.tabela}</TableCell>
+                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{j.job}</TableCell>
+                        <TableCell>
+                          <Chip label={j.grupo?.split('-')[0] || '-'} size="small" variant="outlined" color="primary" />
+                        </TableCell>
+                        <TableCell>
+                          <Chip label={`${j.avg_dur.toFixed(1)} min`} size="small" color="warning" />
+                        </TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{j.max_dur.toFixed(1)}</TableCell>
+                        <TableCell sx={{ fontSize: '0.8rem' }}>{j.total_exec.toLocaleString('pt-BR')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </>
           )}
         </Collapse>
       </Paper>
@@ -878,7 +947,11 @@ export const Tela2Execucoes: React.FC = () => {
         </Box>
         <Collapse in={exibirDesvio}>
           <Divider />
-          {!desvioData?.alertas.length ? (
+          {!filtroAtivo ? (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
+              Configure um filtro para calcular desvios de volumetria.
+            </Typography>
+          ) : !desvioData?.alertas.length ? (
             <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
               Nenhum job com desvio acima de {desvioThreshold}% nos últimos 7 dias.
             </Typography>
@@ -936,7 +1009,11 @@ export const Tela2Execucoes: React.FC = () => {
         </Box>
         <Collapse in={exibirTendencia}>
           <Divider />
-          {!tendenciaData?.alertas.length ? (
+          {!filtroAtivo ? (
+            <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
+              Configure um filtro para calcular tendências de duração.
+            </Typography>
+          ) : !tendenciaData?.alertas.length ? (
             <Typography variant="body2" color="text.secondary" sx={{ p: 2, fontStyle: 'italic' }}>
               Nenhum job com tendência de aumento acima de 30% na última semana.
             </Typography>
@@ -978,57 +1055,75 @@ export const Tela2Execucoes: React.FC = () => {
       </Paper>
 
       {/* Tabela */}
-      {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>}
-      {error    && <Alert severity="error">Erro ao carregar execuções. Verifique se a API está respondendo.</Alert>}
-
-      {data && !isLoading && (
+      {!filtroAtivo ? (
+        <Box sx={{ textAlign: 'center', py: 8, color: 'text.disabled' }}>
+          <FilterListIcon sx={{ fontSize: 52, mb: 1.5, opacity: 0.25 }} />
+          <Typography variant="body1" fontWeight={500} color="text.secondary">
+            Configure um filtro para visualizar os registros
+          </Typography>
+          <Typography variant="caption" color="text.disabled">
+            Use os campos acima para filtrar por tabela, job, grupo, data ou status.
+          </Typography>
+        </Box>
+      ) : (
         <>
-          {data.execucoes.length === 0
-            ? <Alert severity="info">Nenhuma execução encontrada para os filtros selecionados.</Alert>
-            : (
-              <TableContainer component={Paper} variant="outlined">
-                <Table size="small">
-                  <TableHead>
-                    <TableRow sx={{ bgcolor: 'primary.main' }}>
-                      {['Tabela', 'Job', 'Grupo', 'Data / Hora', 'Status', 'Duração (min)'].map(c => (
-                        <TableCell key={c} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{c}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.execucoes.map((e, i) => (
-                      <TableRow key={i} hover>
-                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{e.tabela}</TableCell>
-                        <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{e.job}</TableCell>
-                        <TableCell>
-                          <Chip label={e.grupo?.split('-')[0]} size="small" variant="outlined" color="primary" />
-                        </TableCell>
-                        <TableCell sx={{ fontSize: '0.8rem' }}>
-                          {e.data_execucao ? new Date(e.data_execucao).toLocaleString('pt-BR') : '-'}
-                        </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={e.status}
-                            size="small"
-                            color={e.status === 'OK' ? 'success' : 'error'}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ fontSize: '0.8rem' }}>
-                          {e.duracao_minutos != null ? e.duracao_minutos.toFixed(2) : '-'}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )
-          }
-          <Box sx={{ mt: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Typography variant="caption" color="text.secondary">
-              {data.total.toLocaleString('pt-BR')} registro{data.total !== 1 ? 's' : ''}
-            </Typography>
-            <Pagination count={totalPag} page={page} onChange={(_, v) => setPage(v)} color="primary" size="small" />
-          </Box>
+          {isLoading && <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}><CircularProgress /></Box>}
+          {error     && <Alert severity="error">Erro ao carregar execuções. Verifique se a API está respondendo.</Alert>}
+          {data && !isLoading && (
+            <>
+              {data.execucoes.length === 0
+                ? <Alert severity="info">Nenhuma execução encontrada para os filtros selecionados.</Alert>
+                : (
+                  <>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        {data.total.toLocaleString('pt-BR')} registro{data.total !== 1 ? 's' : ''}
+                      </Typography>
+                      <Tooltip title="Exportar até 5.000 registros com os filtros atuais">
+                        <Button size="small" startIcon={<DownloadIcon />} onClick={exportarCSV} variant="outlined" sx={{ fontSize: '0.75rem' }}>
+                          Exportar CSV
+                        </Button>
+                      </Tooltip>
+                    </Box>
+                    <TableContainer component={Paper} variant="outlined">
+                      <Table size="small">
+                        <TableHead>
+                          <TableRow sx={{ bgcolor: 'primary.main' }}>
+                            {['Tabela', 'Job', 'Grupo', 'Data / Hora', 'Status', 'Duração (min)'].map(c => (
+                              <TableCell key={c} sx={{ color: 'white', fontWeight: 'bold', whiteSpace: 'nowrap' }}>{c}</TableCell>
+                            ))}
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {data.execucoes.map((e, i) => (
+                            <TableRow key={i} hover>
+                              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{e.tabela}</TableCell>
+                              <TableCell sx={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{e.job}</TableCell>
+                              <TableCell>
+                                <Chip label={e.grupo?.split('-')[0]} size="small" variant="outlined" color="primary" />
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.8rem' }}>
+                                {e.data_execucao ? new Date(e.data_execucao).toLocaleString('pt-BR') : '-'}
+                              </TableCell>
+                              <TableCell>
+                                <Chip label={e.status} size="small" color={e.status === 'OK' ? 'success' : 'error'} />
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '0.8rem' }}>
+                                {e.duracao_minutos != null ? e.duracao_minutos.toFixed(2) : '-'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  </>
+                )
+              }
+              <Box sx={{ mt: 2, display: 'flex', justifyContent: 'flex-end' }}>
+                <Pagination count={totalPag} page={page} onChange={(_, v) => setPage(v)} color="primary" size="small" />
+              </Box>
+            </>
+          )}
         </>
       )}
     </Box>
