@@ -331,13 +331,20 @@ def _graficos_via_cagg(
     else:
         total_count, ok_count, nok_count = total_raw, ok_raw, nok_raw
 
-    # Job com maior duração máxima (inclui grupo e ambiente)
-    top_job = db.execute(text(f"""
-        SELECT job, grupo, ambiente, MAX(max_dur) AS max_dur
-        FROM cagg_execucoes_dia
-        WHERE {where} AND max_dur IS NOT NULL
-        GROUP BY job, grupo, ambiente ORDER BY max_dur DESC LIMIT 1
-    """), params).fetchone()
+    # Job com maior duração máxima — usa ORM/base para respeitar todos os filtros,
+    # inclusive status (cagg não armazena max_dur separado por status)
+    top_job = (
+        base.with_entities(
+            ExecucaoTimeline.job,
+            ExecucaoTimeline.grupo,
+            ExecucaoTimeline.ambiente,
+            func.max(ExecucaoTimeline.duracao_minutos).label('max_dur'),
+        )
+        .filter(ExecucaoTimeline.duracao_minutos != None)
+        .group_by(ExecucaoTimeline.job, ExecucaoTimeline.grupo, ExecucaoTimeline.ambiente)
+        .order_by(desc('max_dur'))
+        .first()
+    )
 
     # ── Volume por data (pré-computado) ──────────────────────────────────────
     vol_rows = db.execute(text(f"""
@@ -608,9 +615,11 @@ def get_rotinas_disponiveis(db: Session) -> List[str]:
     return [r.rotina for r in rows if r.rotina]
 
 
-def get_jobs_sem_execucao(db: Session, limit: int = 50):
+def get_jobs_sem_execucao(db: Session, limit: int = 50,
+                          tabela=None, job=None, grupo=None, rotina=None,
+                          carga=None, isd=None, ambientes=None):
     """Jobs cadastrados no CTM que nunca apareceram no LOG de execuções."""
-    rows = (
+    q = (
         db.query(
             Processo.tabela,
             Processo.job,
@@ -626,10 +635,22 @@ def get_jobs_sem_execucao(db: Session, limit: int = 50):
             ),
         )
         .filter(ExecucaoTimeline.tabela == None)
-        .order_by(Processo.tabela, Processo.job)
-        .limit(limit)
-        .all()
     )
+    if tabela:
+        q = q.filter(Processo.tabela.ilike(f'%{tabela}%'))
+    if job:
+        q = q.filter(Processo.job.ilike(f'%{job}%'))
+    if grupo:
+        q = q.filter(Processo.grupo.like(f'{grupo}-%'))
+    if rotina:
+        q = q.filter(func.left(Processo.tabela, 4) == rotina)
+    if carga:
+        q = q.filter(Processo.carga == carga)
+    if isd:
+        q = q.filter(Processo.isd == isd)
+    if ambientes:
+        q = q.filter(Processo.ambiente.in_(ambientes))
+    rows = q.order_by(Processo.tabela, Processo.job).limit(limit).all()
     return [
         {
             'tabela':        r.tabela,
@@ -964,18 +985,20 @@ def get_execucoes_multiplas_por_dia(
             tabela,
             MIN(grupo) AS grupo,
             DATE(data_execucao) AS dia,
-            COUNT(*) AS execucoes_no_dia
+            COUNT(*) / NULLIF(COUNT(DISTINCT job), 0) AS execucoes_no_dia,
+            COUNT(DISTINCT job) AS total_jobs
         FROM mat_execucoes_timeline
         WHERE {where}
         GROUP BY tabela, DATE(data_execucao)
-        HAVING COUNT(*) > 1
+        HAVING COUNT(*) / NULLIF(COUNT(DISTINCT job), 0) > 1
     )
     SELECT
         tabela,
         grupo,
         COUNT(*)              AS dias_com_multiplas,
         MAX(execucoes_no_dia) AS max_execucoes_dia,
-        SUM(execucoes_no_dia) AS total_execucoes
+        SUM(execucoes_no_dia) AS total_execucoes,
+        MAX(total_jobs)       AS total_jobs
     FROM diario
     GROUP BY tabela, grupo
     ORDER BY max_execucoes_dia DESC, dias_com_multiplas DESC
@@ -985,11 +1008,12 @@ def get_execucoes_multiplas_por_dia(
     rows = db.execute(text(sql), params).fetchall()
     return [
         {
-            'tabela':            r.tabela,
-            'grupo':             r.grupo or '',
+            'tabela':             r.tabela,
+            'grupo':              r.grupo or '',
             'dias_com_multiplas': int(r.dias_com_multiplas),
-            'max_execucoes_dia': int(r.max_execucoes_dia),
-            'total_execucoes':   int(r.total_execucoes),
+            'max_execucoes_dia':  int(r.max_execucoes_dia),
+            'total_execucoes':    int(r.total_execucoes),
+            'total_jobs':         int(r.total_jobs or 0),
         }
         for r in rows
     ]

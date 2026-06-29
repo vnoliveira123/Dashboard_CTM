@@ -66,7 +66,7 @@ export interface SlaItem {
   total_exec: number;
 }
 
-function buildParams(filtros: FiltrosExecucao, extra?: Record<string, string>) {
+export function buildParams(filtros: FiltrosExecucao, extra?: Record<string, string>) {
   const p = new URLSearchParams();
   (filtros.tabela   ?? []).forEach(v => p.append('tabela',   v));
   (filtros.job      ?? []).forEach(v => p.append('job',      v));
@@ -80,9 +80,10 @@ function buildParams(filtros: FiltrosExecucao, extra?: Record<string, string>) {
   return p;
 }
 
-export const useExecucoes = (filtros: FiltrosExecucao = {}, page = 1) =>
+export const useExecucoes = (filtros: FiltrosExecucao = {}, page = 1, enabled = true) =>
   useQuery<{ execucoes: ExecucaoItem[]; total: number }>({
     queryKey: ['execucoes', filtros, page],
+    enabled,
     queryFn: async () => {
       const p = buildParams(filtros, { page: String(page), limit: '20' });
       const { data } = await axios.get(`${API_URL}/api/execucoes?${p}`);
@@ -111,9 +112,10 @@ export const useRotinasDisponiveis = () =>
     staleTime: 5 * 60 * 1000,
   });
 
-export const useSlaJobs = (slaMinutos: number, filtros: FiltrosExecucao = {}) =>
+export const useSlaJobs = (slaMinutos: number, filtros: FiltrosExecucao = {}, enabled = true) =>
   useQuery<{ jobs: SlaItem[]; sla_minutos: number }>({
     queryKey: ['execucoes-sla', slaMinutos, filtros],
+    enabled,
     queryFn: async () => {
       const p = buildParams(filtros, { sla_minutos: String(slaMinutos) });
       const { data } = await axios.get(`${API_URL}/api/execucoes/sla?${p}`);
@@ -132,9 +134,10 @@ export interface DesvioVolumetriaItem {
   desvio_pct: number;
 }
 
-export const useDesvioVolumetria = (threshold = 50, filtros: FiltrosExecucao = {}) =>
+export const useDesvioVolumetria = (threshold = 50, filtros: FiltrosExecucao = {}, enabled = true) =>
   useQuery<{ alertas: DesvioVolumetriaItem[]; threshold_pct: number }>({
     queryKey: ['execucoes-desvio-volumetria', threshold, filtros],
+    enabled,
     queryFn: async () => {
       const p = buildParams(filtros, { threshold: String(threshold) });
       const { data } = await axios.get(`${API_URL}/api/execucoes/desvio-volumetria?${p}`);
@@ -159,6 +162,7 @@ export interface MultiplasItem {
   dias_com_multiplas: number;
   max_execucoes_dia:  number;
   total_execucoes:    number;
+  total_jobs:         number;
 }
 
 export const useMultiplasPorDia = (filtros: FiltrosExecucao = {}) =>
@@ -172,9 +176,10 @@ export const useMultiplasPorDia = (filtros: FiltrosExecucao = {}) =>
     staleTime: 5 * 60 * 1000,
   });
 
-export const useTendenciaDuracao = (filtros: FiltrosExecucao = {}) =>
+export const useTendenciaDuracao = (filtros: FiltrosExecucao = {}, enabled = true) =>
   useQuery<{ alertas: TendenciaDuracaoItem[] }>({
     queryKey: ['execucoes-tendencia-duracao', filtros],
+    enabled,
     queryFn: async () => {
       const p = buildParams(filtros);
       const { data } = await axios.get(`${API_URL}/api/execucoes/tendencia-duracao?${p}`);
